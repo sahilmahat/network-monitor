@@ -2,20 +2,25 @@
 main.py — FastAPI application entry point.
 
 Wires together:
+  - Pydantic-validated config loaded at startup (fail-fast)
   - Background scheduler that pings every N seconds
+  - Background cleanup task that deletes old records daily
   - SQLite storage for results and incidents
-  - REST API for the dashboard to query
+  - REST API for the dashboard
   - Static file serving for the dashboard frontend
 """
 
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from app.monitor import load_config, ping_all_targets
+from app.monitor import ping_all_targets
+from app.config_schema import load_and_validate_config
 from app.database import (
     init_db,
     insert_ping_result,
@@ -23,6 +28,7 @@ from app.database import (
     get_history,
     get_uptime_percentage,
     get_recent_incidents,
+    cleanup_old_records,
 )
 
 # ----------------------------------------------------------------------
@@ -36,14 +42,14 @@ log = logging.getLogger("cipl-monitor")
 
 
 # ----------------------------------------------------------------------
-# Background scheduler
+# Background tasks
 # ----------------------------------------------------------------------
-async def monitor_loop(config: dict) -> None:
+async def monitor_loop(config) -> None:
     """
     Run forever: ping all targets, store results, sleep, repeat.
     Wraps each iteration in try/except so a single failure can't kill the loop.
     """
-    interval = config.get("ping_interval_seconds", 30)
+    interval = config.ping_interval_seconds
     log.info(f"Monitor loop started, interval = {interval}s")
 
     while True:
@@ -57,14 +63,28 @@ async def monitor_loop(config: dict) -> None:
             log.info(f"Pinged {len(results)} targets: {up} up, {down} down")
 
         except Exception as e:
-            # Catch-all: log and continue. Loop must never die.
             log.exception(f"monitor_loop iteration failed: {e}")
 
         await asyncio.sleep(interval)
 
 
+async def cleanup_loop(retention_days: int) -> None:
+    """
+    Run forever: sleep 24 hours, then delete old records.
+    Sleeps first so we don't VACUUM on every startup.
+    """
+    log.info(f"Cleanup loop started, retention = {retention_days} days")
+    while True:
+        await asyncio.sleep(24 * 60 * 60)  # 24 hours
+        try:
+            result = cleanup_old_records(retention_days)
+            log.info(f"Cleanup: deleted {result['deleted_pings']} old pings")
+        except Exception as e:
+            log.exception(f"cleanup_loop iteration failed: {e}")
+
+
 # ----------------------------------------------------------------------
-# Lifespan — startup/shutdown hooks (modern FastAPI pattern)
+# Lifespan — startup/shutdown hooks
 # ----------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -73,22 +93,30 @@ async def lifespan(app: FastAPI):
     init_db()
     log.info("Database initialised")
 
-    config = load_config()
+    # Validate config — crashes here if config.yaml is malformed
+    config = load_and_validate_config()
+    log.info(
+        f"Config validated: {len(config.gateways)} gateways, "
+        f"{len(config.vms)} VMs, retention {config.retention_days}d"
+    )
     app.state.config = config
 
-    # Launch background scheduler as an asyncio task
-    task = asyncio.create_task(monitor_loop(config))
-    log.info("Background monitor scheduled")
+    # Launch background tasks
+    monitor_task = asyncio.create_task(monitor_loop(config))
+    cleanup_task = asyncio.create_task(cleanup_loop(config.retention_days))
+    log.info("Background tasks scheduled")
 
     yield  # <-- application runs here
 
     # --- Shutdown ---
-    log.info("Shutting down — cancelling monitor loop")
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    log.info("Shutting down — cancelling background tasks")
+    monitor_task.cancel()
+    cleanup_task.cancel()
+    for task in (monitor_task, cleanup_task):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 # ----------------------------------------------------------------------
@@ -118,6 +146,39 @@ async def api_status():
     return {
         "targets": targets,
         "count": len(targets),
+    }
+
+
+@app.get("/api/summary")
+async def api_summary():
+    """
+    Aggregated dashboard stats: total targets, up/down counts, recent incident count.
+    Single endpoint for the dashboard's top bar — saves multiple round-trips.
+    """
+    targets = get_latest_status()
+    incidents = get_recent_incidents(hours=24)
+
+    total = len(targets)
+    up = sum(1 for t in targets if t["is_up"])
+    down = total - up
+
+    gateways = [t for t in targets if t["type"] == "gateway"]
+    vms = [t for t in targets if t["type"] == "vm"]
+
+    return {
+        "total_targets": total,
+        "up": up,
+        "down": down,
+        "gateways": {
+            "total": len(gateways),
+            "up": sum(1 for t in gateways if t["is_up"]),
+        },
+        "vms": {
+            "total": len(vms),
+            "up": sum(1 for t in vms if t["is_up"]),
+        },
+        "incidents_24h": len(incidents),
+        "last_updated": targets[0]["checked_at"] if targets else None,
     }
 
 
@@ -158,7 +219,6 @@ async def api_incidents(hours: int = 24):
 @app.get("/")
 async def root():
     """Serve the dashboard if it exists, otherwise a placeholder."""
-    from pathlib import Path
     index = Path("static/index.html")
     if index.exists():
         return FileResponse(index)
@@ -170,6 +230,5 @@ async def root():
 
 
 # Serve any other static files (CSS, JS) once we add them
-from pathlib import Path
 if Path("static").exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")

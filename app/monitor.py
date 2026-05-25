@@ -2,9 +2,10 @@
 monitor.py — ping targets and report their status.
 
 Responsibilities:
-1. load_config()       -> read config.yaml
+1. load_config()       -> read config.yaml (raw dict — legacy, kept for standalone testing)
 2. ping_target()       -> ping one host, return dict with status + latency
-3. ping_all_targets()  -> ping every target in config, return list of results
+3. ping_all_targets()  -> ping every target, return list of results
+                          (accepts both Pydantic Config and plain dict)
 """
 
 from icmplib import ping
@@ -13,7 +14,7 @@ import yaml
 
 
 def load_config(path: str = "config.yaml") -> dict:
-    """Read config.yaml and return it as a dict."""
+    """Read config.yaml and return it as a raw dict (no validation)."""
     with open(path, "r") as f:
         return yaml.safe_load(f)
 
@@ -39,18 +40,28 @@ def ping_target(host: str, timeout: int = 2) -> dict:
         }
 
 
-def ping_all_targets(config: dict) -> list[dict]:
+def ping_all_targets(config) -> list[dict]:
     """
-    Ping every gateway and VM listed in config.
+    Ping every gateway and VM in config.
+    Accepts either a Pydantic Config object OR a raw dict (for backward compat).
     Returns a list of result dicts, one per target.
     """
-    timeout = config.get("ping_timeout_seconds", 2)
+    # Detect whether we got a Pydantic Config or a plain dict
+    if hasattr(config, "ping_timeout_seconds"):
+        # Pydantic Config object
+        timeout = config.ping_timeout_seconds
+        all_targets = list(config.gateways) + list(config.vms)
+        targets_data = [
+            {"name": t.name, "host": t.host, "type": t.type}
+            for t in all_targets
+        ]
+    else:
+        # Plain dict (from yaml.safe_load)
+        timeout = config.get("ping_timeout_seconds", 2)
+        targets_data = config.get("gateways", []) + config.get("vms", [])
+
     results = []
-
-    # Combine gateways and vms into one iterable list
-    all_targets = config.get("gateways", []) + config.get("vms", [])
-
-    for target in all_targets:
+    for target in targets_data:
         ping_result = ping_target(target["host"], timeout=timeout)
         results.append({
             "name": target["name"],

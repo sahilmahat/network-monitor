@@ -1,17 +1,14 @@
 """
 database.py — SQLite storage for ping results and incidents.
 
-Two tables:
-  - ping_results: every ping result (host, status, latency, timestamp)
-  - incidents:    state transitions (up→down, down→up)
-
 Public functions:
-  init_db()                       -> create tables if not exist
-  insert_ping_result(result)      -> store one ping
-  get_latest_status()             -> latest result per host
-  get_history(host, hours)        -> history for one host
-  get_uptime_percentage(host, h)  -> uptime % over window
-  get_recent_incidents(hours)     -> recent state transitions
+  init_db()                          -> create tables if not exist
+  insert_ping_result(result)         -> store one ping (detects state transitions)
+  get_latest_status()                -> latest result per host
+  get_history(host, hours)           -> history for one host
+  get_uptime_percentage(host, hours) -> uptime % over window
+  get_recent_incidents(hours)        -> recent state transitions
+  cleanup_old_records(retention_days)-> delete old rows, reclaim disk space
 """
 
 import sqlite3
@@ -200,13 +197,49 @@ def get_recent_incidents(hours: int = 24) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def cleanup_old_records(retention_days: int) -> dict:
+    """
+    Delete ping_results older than retention_days.
+    Also deletes 'recovered' incidents older than 1 year.
+    VACUUMs to reclaim disk space.
+    Returns count of deleted rows. Run this nightly.
+    """
+    cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
+    with get_conn() as conn:
+        # Count first so we can log how much we deleted
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS c FROM ping_results WHERE checked_at < ?",
+            (cutoff,)
+        ).fetchone()
+        deleted_pings = count_row["c"]
+
+        conn.execute("DELETE FROM ping_results WHERE checked_at < ?", (cutoff,))
+
+        # Also clean up old recovered incidents (keep 1 year)
+        incident_cutoff = (datetime.now() - timedelta(days=365)).isoformat()
+        conn.execute(
+            "DELETE FROM incidents WHERE occurred_at < ? AND event_type = 'recovered'",
+            (incident_cutoff,)
+        )
+
+    # VACUUM must run OUTSIDE a transaction → separate connection, no context manager
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.isolation_level = None  # autocommit mode so VACUUM works
+        conn.execute("VACUUM")
+    finally:
+        conn.close()
+
+    return {"deleted_pings": deleted_pings, "cutoff": cutoff}
+
+
 # Standalone test runner — `python -m app.database`
 if __name__ == "__main__":
     print("Initialising database...")
     init_db()
     print(f"✅ Database ready at: {DB_PATH.resolve()}")
 
-    # Insert a fake ping for sanity testing
     print("\nInserting a test ping result...")
     insert_ping_result({
         "host": "8.8.8.8",
