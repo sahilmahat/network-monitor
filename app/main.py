@@ -6,7 +6,7 @@ Wires together:
   - Background scheduler that pings every N seconds
   - Background cleanup task that deletes old records daily
   - SQLite storage for results and incidents
-  - REST API for the dashboard
+  - REST API for the dashboard (filters DB results against current config)
   - Static file serving for the dashboard frontend
 """
 
@@ -131,6 +131,18 @@ app = FastAPI(
 
 
 # ----------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------
+def _get_configured_hosts() -> set[str]:
+    """
+    Return the set of hosts currently in config (source of truth).
+    Used to filter DB query results so removed targets don't appear on the dashboard.
+    """
+    config = app.state.config
+    return {t.host for t in list(config.gateways) + list(config.vms)}
+
+
+# ----------------------------------------------------------------------
 # API endpoints
 # ----------------------------------------------------------------------
 @app.get("/healthz")
@@ -141,8 +153,12 @@ async def healthz():
 
 @app.get("/api/status")
 async def api_status():
-    """Latest ping result for every monitored target."""
-    targets = get_latest_status()
+    """
+    Latest ping result for every CURRENTLY CONFIGURED target.
+    Hosts removed from config are filtered out, even if they have history in the DB.
+    """
+    configured = _get_configured_hosts()
+    targets = [t for t in get_latest_status() if t["host"] in configured]
     return {
         "targets": targets,
         "count": len(targets),
@@ -152,11 +168,15 @@ async def api_status():
 @app.get("/api/summary")
 async def api_summary():
     """
-    Aggregated dashboard stats: total targets, up/down counts, recent incident count.
+    Aggregated dashboard stats — counts ONLY currently configured targets.
     Single endpoint for the dashboard's top bar — saves multiple round-trips.
     """
-    targets = get_latest_status()
-    incidents = get_recent_incidents(hours=24)
+    configured = _get_configured_hosts()
+    targets = [t for t in get_latest_status() if t["host"] in configured]
+    incidents = [
+        i for i in get_recent_incidents(hours=24)
+        if i["host"] in configured
+    ]
 
     total = len(targets)
     up = sum(1 for t in targets if t["is_up"])
@@ -204,17 +224,25 @@ async def api_uptime(host: str, hours: int = 24):
 
 @app.get("/api/incidents")
 async def api_incidents(hours: int = 24):
-    """Recent state-transition events (down/recovered)."""
+    """
+    Recent state-transition events (down/recovered).
+    Filtered against current config so old removed hosts don't pollute the timeline.
+    """
     if hours < 1 or hours > 720:
         raise HTTPException(status_code=400, detail="hours must be between 1 and 720")
+
+    configured = _get_configured_hosts()
+    all_incidents = get_recent_incidents(hours)
+    incidents = [i for i in all_incidents if i["host"] in configured]
+
     return {
         "hours": hours,
-        "incidents": get_recent_incidents(hours),
+        "incidents": incidents,
     }
 
 
 # ----------------------------------------------------------------------
-# Static frontend (will be populated on Day 3)
+# Static frontend
 # ----------------------------------------------------------------------
 @app.get("/")
 async def root():
@@ -229,6 +257,6 @@ async def root():
     }
 
 
-# Serve any other static files (CSS, JS) once we add them
+# Serve any other static files (CSS, JS)
 if Path("static").exists():
     app.mount("/static", StaticFiles(directory="static"), name="static")

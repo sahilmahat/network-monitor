@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CIPL Network Monitor</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header class="topbar">
+        <div class="topbar-left">
+            <h1>CIPL Network Monitor</h1>
+            <p class="subtitle" id="last-updated">Loading...</p>
+        </div>
+        <div class="topbar-right">
+            <span class="health-badge" id="health-badge">Connecting...</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Summary cards (top bar) -->
+        <section class="summary-grid" id="summary-grid">
+            <div class="summary-card">
+                <div class="summary-label">Targets</div>
+                <div class="summary-value" id="stat-total">—</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">Up</div>
+                <div class="summary-value text-up" id="stat-up">—</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">Down</div>
+                <div class="summary-value text-down" id="stat-down">—</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-label">Incidents 24h</div>
+                <div class="summary-value" id="stat-incidents">—</div>
+            </div>
+        </section>
+
+        <!-- Gateways section -->
+        <section>
+            <h2 class="section-title">Gateways</h2>
+            <div class="targets-grid" id="gateways-grid">
+                <p class="empty-msg">Loading...</p>
+            </div>
+        </section>
+
+        <!-- VMs section -->
+        <section>
+            <h2 class="section-title">VMs</h2>
+            <div class="targets-grid" id="vms-grid">
+                <p class="empty-msg">Loading...</p>
+            </div>
+        </section>
+
+        <!-- Recent incidents -->
+        <section>
+            <h2 class="section-title">Recent incidents (last 24h)</h2>
+            <div class="incidents-list" id="incidents-list">
+                <p class="empty-msg">Loading...</p>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>CIPL Network Monitor v1.0 — self-hosted | <a href="/docs">API docs</a></p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

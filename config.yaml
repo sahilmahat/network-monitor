@@ -1,22 +1,85 @@
-# CIPL Network Monitor — targets to ping
+# CIPL Network Monitor — v1.0 monitored targets
+# Scope: 8 internet gateways + 8 ESXi hypervisors = 16 targets
+# Production VMs will be added in v1.1 once this baseline is proven stable.
 
 ping_interval_seconds: 30
 ping_timeout_seconds: 2
+retention_days: 30
 
+# ----------------------------------------------------------------------
+# Gateways — 8 internet routers across 2 networks
+# N1 = Main office network, N2 = Isolated network
+# ----------------------------------------------------------------------
 gateways:
-  - name: "Gateway 1 (ISP-A)"
-    host: "192.168.1.1"      # ← replace with real gateway IP later
+  # --- N1 (Main Network) ---
+  - name: "N1 Router 1 — ACT"
+    host: "192.168.0.1"
     type: "gateway"
 
-  - name: "Gateway 2 (ISP-B)"
-    host: "192.168.2.1"      # ← replace later
+  - name: "N1 Router 2 — YOU BB"
+    host: "192.168.0.2"
     type: "gateway"
 
-  - name: "Gateway 3 (ISP-C)"
-    host: "192.168.0.1"      # ← replace later
+  - name: "N1 Router 3 — Hathway"
+    host: "192.168.0.3"
     type: "gateway"
 
+  - name: "N1 Router 4 — Indiqube ACT"
+    host: "192.168.0.4"
+    type: "gateway"
+
+  # --- N2 (Isolated Network) ---
+  - name: "N2 Router 1 — Hathway"
+    host: "192.168.200.1"
+    type: "gateway"
+
+  - name: "N2 Router 2 — YOU BB"
+    host: "192.168.200.2"
+    type: "gateway"
+
+  - name: "N2 Router 3 — Indiqube"
+    host: "192.168.200.3"
+    type: "gateway"
+
+  - name: "N2 Router 4 — ACT"
+    host: "192.168.200.4"
+    type: "gateway"
+
+# ----------------------------------------------------------------------
+# ESXi hypervisors — 8 hosts running all VMs
+# Classified as 'vm' for v1.0 schema simplicity; refactor to 'hypervisor' in v1.1
+# ----------------------------------------------------------------------
 vms:
-  - name: "Test target (Google DNS)"
-    host: "8.8.8.8"
+  # --- N1 (Main Network) ESXi hosts ---
+  - name: "ESXi — Experimental & R&D"
+    host: "192.168.0.10"
+    type: "vm"
+
+  - name: "ESXi — Development"
+    host: "192.168.0.11"
+    type: "vm"
+
+  - name: "ESXi — QA"
+    host: "192.168.0.12"
+    type: "vm"
+
+  - name: "ESXi — Production (N1)"
+    host: "192.168.0.13"
+    type: "vm"
+
+  - name: "ESXi — Demo & R&D"
+    host: "192.168.0.14"
+    type: "vm"
+
+  - name: "ESXi — Kumar sir"
+    host: "192.168.0.15"
+    type: "vm"
+
+  # --- N2 (Isolated Network) ESXi hosts ---
+  - name: "ESXi — Production (N2-A)"
+    host: "192.168.200.10"
+    type: "vm"
+
+  - name: "ESXi — Production (N2-B)"
+    host: "192.168.200.11"
     type: "vm"
