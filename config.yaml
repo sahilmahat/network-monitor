@@ -1,0 +1,22 @@
+# CIPL Network Monitor — targets to ping
+
+ping_interval_seconds: 30
+ping_timeout_seconds: 2
+
+gateways:
+  - name: "Gateway 1 (ISP-A)"
+    host: "192.168.1.1"      # ← replace with real gateway IP later
+    type: "gateway"
+
+  - name: "Gateway 2 (ISP-B)"
+    host: "192.168.2.1"      # ← replace later
+    type: "gateway"
+
+  - name: "Gateway 3 (ISP-C)"
+    host: "192.168.0.1"      # ← replace later
+    type: "gateway"
+
+vms:
+  - name: "Test target (Google DNS)"
+    host: "8.8.8.8"
+    type: "vm"
